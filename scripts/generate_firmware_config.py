@@ -1,0 +1,92 @@
+#!/usr/bin/env python3
+"""Generate the ignored ESP32 Arduino header from .env.firmware."""
+
+from __future__ import annotations
+
+import re
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+ENV_FILE = ROOT / ".env.firmware"
+OUTPUT = ROOT / "firmware" / "mqtt_sensor" / "firmware_config.h"
+REQUIRED = (
+    "WIFI_SSID", "WIFI_PASSWORD", "MQTT_HOST", "MQTT_PORT", "MQTT_USERNAME",
+    "MQTT_PASSWORD", "MQTT_CLIENT_ID", "MQTT_TOPIC", "MQTT_QOS",
+    "PUBLISH_INTERVAL_MS", "DEVICE_ID",
+)
+
+
+def parse_env(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, separator, value = line.partition("=")
+        if not separator or not re.fullmatch(r"[A-Z][A-Z0-9_]*", key.strip()):
+            raise ValueError(f"Invalid assignment on line {number}")
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        values[key.strip()] = value
+    missing = [key for key in REQUIRED if not values.get(key)]
+    if missing:
+        raise ValueError("Missing values: " + ", ".join(missing))
+    placeholders = [key for key in REQUIRED if values[key].startswith("replace-with-")]
+    if placeholders == ["MQTT_PASSWORD"]:
+        lab_env = ROOT / ".env"
+        if lab_env.is_file():
+            lab_values = {}
+            for raw in lab_env.read_text(encoding="utf-8").splitlines():
+                line = raw.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    key, value = line.split("=", 1)
+                    lab_values[key.strip()] = value.strip()
+            sensor_password = lab_values.get("SENSOR_PASSWORD", "")
+            if sensor_password and not sensor_password.startswith("replace-with-"):
+                values["MQTT_PASSWORD"] = sensor_password
+                placeholders = []
+                print("Using SENSOR_PASSWORD from .env for firmware configuration")
+    if placeholders:
+        raise ValueError("Replace placeholder values: " + ", ".join(placeholders))
+    if not values["MQTT_PORT"].isdigit() or not 1 <= int(values["MQTT_PORT"]) <= 65535:
+        raise ValueError("MQTT_PORT must be an integer from 1 to 65535")
+    if values["MQTT_QOS"] not in {"0", "1"}:
+        raise ValueError("MQTT_QOS must be 0 or 1 (ArduinoMqttClient supports QoS 0/1)")
+    if not values["PUBLISH_INTERVAL_MS"].isdigit() or int(values["PUBLISH_INTERVAL_MS"]) < 100:
+        raise ValueError("PUBLISH_INTERVAL_MS must be an integer of at least 100")
+    return values
+
+
+def cpp_string(value: str) -> str:
+    escaped = value.replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+    return '"' + escaped + '"'
+
+
+def main() -> None:
+    if not ENV_FILE.is_file():
+        raise SystemExit("Missing .env.firmware; copy .env.firmware.example and fill in its values")
+    values = parse_env(ENV_FILE)
+    lines = [
+        "#pragma once",
+        "// Generated from .env.firmware. This file is ignored by Git.",
+        f"#define WIFI_SSID {cpp_string(values['WIFI_SSID'])}",
+        f"#define WIFI_PASSWORD {cpp_string(values['WIFI_PASSWORD'])}",
+        f"#define MQTT_HOST {cpp_string(values['MQTT_HOST'])}",
+        f"#define MQTT_PORT {int(values['MQTT_PORT'])}",
+        f"#define MQTT_USERNAME {cpp_string(values['MQTT_USERNAME'])}",
+        f"#define MQTT_PASSWORD {cpp_string(values['MQTT_PASSWORD'])}",
+        f"#define MQTT_CLIENT_ID {cpp_string(values['MQTT_CLIENT_ID'])}",
+        f"#define MQTT_TOPIC {cpp_string(values['MQTT_TOPIC'])}",
+        f"#define MQTT_QOS {int(values['MQTT_QOS'])}",
+        f"#define PUBLISH_INTERVAL_MS {int(values['PUBLISH_INTERVAL_MS'])}UL",
+        f"#define DEVICE_ID {cpp_string(values['DEVICE_ID'])}",
+        "",
+    ]
+    OUTPUT.write_text("\n".join(lines), encoding="utf-8")
+    OUTPUT.chmod(0o600)
+    print(f"Generated {OUTPUT.relative_to(ROOT)} (credentials excluded from Git)")
+
+
+if __name__ == "__main__":
+    main()

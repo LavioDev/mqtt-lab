@@ -1,0 +1,12 @@
+.env
+.env.firmware
+.runtime/
+firmware/mqtt_sensor/firmware_config.h
+config/mosquitto/auth/
+data/raw/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+dashboard/frontend/node_modules/
+dashboard/frontend/dist/
+

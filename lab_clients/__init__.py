@@ -1,0 +1,1 @@
+"""Synthetic MQTT lab clients."""

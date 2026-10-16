@@ -1,7 +1,7 @@
-# MQTT Sentinel — Kế hoạch bài lab An ninh mạng
+# MQTT LAB — Kế hoạch bài lab An ninh mạng
 
-> **Tên đề tài:** MQTT Sentinel — Phân tích lưu lượng và phát hiện hành vi bất thường trong mạng MQTT của hệ thống IoT công nghiệp  
-> **Tên tiếng Anh:** *MQTT Sentinel: Network Forensics and Intrusion Detection for Industrial IoT MQTT Traffic*  
+> **Tên đề tài:** MQTT LAB — Phân tích lưu lượng và phát hiện hành vi bất thường trong mạng MQTT của hệ thống IoT công nghiệp  
+> **Tên tiếng Anh:** *MQTT LAB: Network Forensics and Intrusion Detection for Industrial IoT MQTT Traffic*  
 > **Loại:** Lab thực nghiệm + mini research project  
 > **Trạng thái:** Planning  
 > **Phiên bản kế hoạch:** 1.0 — 16/10/2026  
@@ -313,7 +313,7 @@ Quy ước xử lý mẫu số bằng 0 (trả N/A thay vì bịa 100%). Báo c�
 ## 11. Cấu trúc repo dự kiến
 
 ```text
-mqtt-sentinel/
+mqtt-lab/
 ├── README.md
 ├── plan.md
 ├── compose.yaml
