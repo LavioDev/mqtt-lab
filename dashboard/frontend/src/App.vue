@@ -6,6 +6,8 @@ type Message = {
   id: number
   received_at: string
   topic: string
+  packet_type: 'PUBLISH'
+  device_id: string | null
   qos: number
   retained: boolean
   payload: { kind: 'json' | 'text' | 'base64'; value: string; truncated: boolean }
@@ -14,6 +16,8 @@ type Message = {
 type State = {
   broker: { connected: boolean; changed_at: string | null; stats_at: string | null }
   metrics: Record<string, number>
+  devices: { active_count: number; active_window_seconds: number }
+  iot_publish_count: number
   telemetry_rate: number
   last_message_at: string | null
   messages: Message[]
@@ -22,7 +26,8 @@ type State = {
 
 const blankState = (): State => ({
   broker: { connected: false, changed_at: null, stats_at: null },
-  metrics: {}, telemetry_rate: 0, last_message_at: null, messages: [], telemetry: [],
+  metrics: {}, devices: { active_count: 0, active_window_seconds: 15 }, iot_publish_count: 0,
+  telemetry_rate: 0, last_message_at: null, messages: [], telemetry: [],
 })
 const state = ref<State>(blankState())
 const browserConnected = ref(false)
@@ -63,7 +68,7 @@ function connectEvents() {
   })
   source.addEventListener('message', (event) => {
     const item = JSON.parse((event as MessageEvent).data) as Message
-    state.value.messages = [item, ...state.value.messages].slice(0, 200)
+    state.value.messages = [item, ...state.value.messages].slice(0, 100)
     state.value.last_message_at = item.received_at
     if (item.telemetry) state.value.telemetry = [...state.value.telemetry, item.telemetry].slice(-120)
     scrollTable()
@@ -76,6 +81,12 @@ function connectEvents() {
     const update = JSON.parse((event as MessageEvent).data) as { metrics: Record<string, number>; stats_at: string }
     state.value.metrics = update.metrics
     state.value.broker.stats_at = update.stats_at
+  })
+  source.addEventListener('devices', (event) => {
+    state.value.devices = JSON.parse((event as MessageEvent).data) as State['devices']
+  })
+  source.addEventListener('iot_messages', (event) => {
+    state.value.iot_publish_count = (JSON.parse((event as MessageEvent).data) as { count: number }).count
   })
   source.addEventListener('rate', (event) => {
     state.value.telemetry_rate = (JSON.parse((event as MessageEvent).data) as { telemetry_rate: number }).telemetry_rate
@@ -159,11 +170,11 @@ onUnmounted(() => eventSource.value?.close())
       </div>
     </header>
 
-    <section class="stats-grid" aria-label="Thống kê broker">
+    <section class="stats-grid" aria-label="Thống kê thiết bị và broker">
       <article class="stat-card accent-cyan">
-        <div class="stat-label">CLIENT ĐANG KẾT NỐI <span class="stat-symbol">◉</span></div>
-        <div class="stat-value">{{ formatNumber(metrics.clients_connected) }}<small> clients</small></div>
-        <div class="stat-foot">Bao gồm dashboard monitor</div>
+        <div class="stat-label">THIẾT BỊ ĐANG HOẠT ĐỘNG <span class="stat-symbol">◉</span></div>
+        <div class="stat-value">{{ formatNumber(state.devices.active_count) }}<small> thiết bị</small></div>
+        <div class="stat-foot">Có telemetry trong {{ state.devices.active_window_seconds }} giây gần nhất</div>
       </article>
       <article class="stat-card accent-violet">
         <div class="stat-label">BROKER UPTIME <span class="stat-symbol">◷</span></div>
@@ -171,9 +182,8 @@ onUnmounted(() => eventSource.value?.close())
         <div class="stat-foot">Mosquitto · MQTT 3.1.1</div>
       </article>
       <article class="stat-card accent-blue">
-        <div class="stat-label">MESSAGE NHẬN / GỬI <span class="stat-symbol">⇄</span></div>
-        <div class="stat-value">{{ formatNumber(metrics.messages_received_total) }}<small> / {{ formatNumber(metrics.messages_sent_total) }}</small></div>
-        <div class="stat-foot">Tổng từ khi broker khởi động</div>
+        <div class="stat-label">IOT PUBLISH ĐÃ NHẬN <span class="stat-symbol">⇩</span></div>
+        <div class="stat-value">{{ formatNumber(state.iot_publish_count) }}<small> gói tin</small></div>
       </article>
       <article class="stat-card accent-orange">
         <div class="stat-label">TELEMETRY OBSERVED <span class="stat-symbol">⌁</span></div>
@@ -223,7 +233,10 @@ onUnmounted(() => eventSource.value?.close())
 
     <section class="panel traffic-panel">
       <div class="traffic-heading">
-        <div><div class="panel-kicker"><span class="legend-dot temp-dot"></span> LIVE TRAFFIC</div><h2>Dòng bản tin <span class="count-badge">{{ filteredMessages.length }}</span></h2></div>
+        <div>
+          <div class="panel-kicker"><span class="legend-dot temp-dot"></span> MQTT PUBLISH · factory/#</div>
+          <h2>Dòng bản tin <span class="count-badge">{{ filteredMessages.length }} PUBLISH</span></h2>
+        </div>
         <div class="traffic-controls">
           <label class="filter-box"><span>⌕</span><input v-model="topicFilter" type="search" placeholder="Lọc theo topic…" aria-label="Lọc bản tin theo topic" /></label>
           <label class="scroll-toggle"><input v-model="autoScroll" type="checkbox"/><span class="toggle-track"></span><span>Tự cuộn</span></label>
@@ -231,10 +244,11 @@ onUnmounted(() => eventSource.value?.close())
       </div>
       <div class="table-wrap" ref="tableBody">
         <table>
-          <thead><tr><th>THỜI GIAN</th><th>TOPIC</th><th>QOS</th><th>RETAINED</th><th>PAYLOAD</th><th></th></tr></thead>
+          <thead><tr><th>THỜI GIAN</th><th>LOẠI GÓI</th><th>TOPIC</th><th>QOS</th><th>RETAINED</th><th>PAYLOAD</th><th></th></tr></thead>
           <tbody v-if="filteredMessages.length">
             <tr v-for="message in filteredMessages" :key="message.id" @click="selectedMessage = message" tabindex="0" @keydown.enter="selectedMessage = message">
               <td class="time-cell">{{ formatTime(message.received_at) }}</td>
+              <td><span class="packet-chip">{{ message.packet_type }}</span></td>
               <td><code class="topic-chip">{{ message.topic }}</code></td>
               <td><span class="qos-chip">{{ message.qos }}</span></td>
               <td><span class="retained" :class="message.retained ? 'yes' : ''">{{ message.retained ? 'YES' : 'NO' }}</span></td>
@@ -249,15 +263,15 @@ onUnmounted(() => eventSource.value?.close())
           <span>{{ loaded ? 'Khi ESP32 publish dữ liệu, bản tin sẽ xuất hiện tại đây.' : 'Dashboard sẽ tự cập nhật khi kết nối thành công.' }}</span>
         </div>
       </div>
-      <div class="table-footer"><span><i class="live-dot"></i> STREAM ĐANG HOẠT ĐỘNG</span><span>Nhận gần nhất · {{ formatTime(state.last_message_at) }}</span></div>
+      <div class="table-footer"><span><i class="live-dot"></i> MQTT PUBLISH STREAM</span><span>Nhận gần nhất · {{ formatTime(state.last_message_at) }}</span></div>
     </section>
 
     <footer><span>MQTT LAB <b>·</b> LIVE MONITOR</span><span>Broker statistics refresh theo chu kỳ Mosquitto</span></footer>
 
     <div v-if="selectedMessage" class="modal-backdrop" @click.self="selectedMessage = null" @keydown.esc="selectedMessage = null">
       <section class="detail-modal" role="dialog" aria-modal="true" aria-label="Chi tiết bản tin">
-        <div class="modal-head"><div><div class="panel-kicker">MESSAGE DETAIL · #{{ selectedMessage.id }}</div><h2>Chi tiết bản tin</h2></div><button class="close-button" @click="selectedMessage = null" aria-label="Đóng">×</button></div>
-        <div class="detail-meta"><span>TOPIC</span><code>{{ selectedMessage.topic }}</code><span>THỜI GIAN NHẬN</span><code>{{ formatTime(selectedMessage.received_at) }}</code><span>QOS / RETAINED</span><code>{{ selectedMessage.qos }} / {{ selectedMessage.retained ? 'yes' : 'no' }}</code><span>PAYLOAD TYPE</span><code>{{ selectedMessage.payload.kind }}{{ selectedMessage.payload.truncated ? ' · truncated at 64 KiB' : '' }}</code></div>
+        <div class="modal-head"><div><div class="panel-kicker">MQTT PUBLISH · #{{ selectedMessage.id }}</div><h2>Chi tiết bản tin</h2></div><button class="close-button" @click="selectedMessage = null" aria-label="Đóng">×</button></div>
+        <div class="detail-meta"><span>MQTT PACKET</span><code>{{ selectedMessage.packet_type }}</code><span>DEVICE ID</span><code>{{ selectedMessage.device_id || 'Không có trong payload' }}</code><span>TOPIC</span><code>{{ selectedMessage.topic }}</code><span>THỜI GIAN NHẬN</span><code>{{ formatTime(selectedMessage.received_at) }}</code><span>QOS / RETAINED</span><code>{{ selectedMessage.qos }} / {{ selectedMessage.retained ? 'yes' : 'no' }}</code><span>PAYLOAD TYPE</span><code>{{ selectedMessage.payload.kind }}{{ selectedMessage.payload.truncated ? ' · truncated at 64 KiB' : '' }}</code></div>
         <pre class="detail-payload">{{ payloadDetail(selectedMessage) }}</pre>
       </section>
     </div>

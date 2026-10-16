@@ -25,7 +25,7 @@ Khi nâng cấp từ stack cũ tên `mqtt-sentinel`, `run.sh` sẽ tự dọn st
 - Trạng thái riêng cho trình duyệt ↔ backend và backend ↔ broker.
 - Thống kê Mosquitto lấy từ `$SYS`; số client tính cả dashboard monitor.
 - Biểu đồ temperature/vibration và danh sách bản tin `factory/#`.
-- Lịch sử RAM tối đa 200 bản tin, tối đa 120 điểm trên mỗi biểu đồ; restart backend sẽ xóa lịch sử.
+- Lịch sử RAM tối đa 100 bản tin gần nhất, tối đa 120 điểm trên mỗi biểu đồ; restart backend sẽ xóa lịch sử.
 - Dashboard chỉ đọc; credential MQTT chỉ được dùng ở backend. Không có đăng nhập dashboard.
 
 Kiểm tra nhanh API:

@@ -1,4 +1,5 @@
 #include <ArduinoMqttClient.h>
+#include <esp_system.h>
 #include <WiFi.h>
 #include <cstring>
 
@@ -43,6 +44,7 @@ void connectMqtt() {
 void setup() {
   Serial.begin(115200);
   delay(500);
+  randomSeed(esp_random());
   mqttClient.setKeepAliveInterval(30 * 1000);
   connectWiFi();
   connectMqtt();
@@ -58,8 +60,8 @@ void loop() {
   if (now - lastPublishMs < PUBLISH_INTERVAL_MS) return;
   lastPublishMs = now;
 
-  const float temperature = 38.0f + static_cast<float>((messageNumber * 7) % 91) / 10.0f;
-  const float vibration = 1.0f + static_cast<float>((messageNumber * 13) % 25) / 10.0f;
+  const float temperature = static_cast<float>(random(360, 451)) / 10.0f;
+  const float vibration = static_cast<float>(random(5, 41)) / 10.0f;
   char payload[192];
   snprintf(payload, sizeof(payload),
            "{\"message_id\":\"%s-%06lu\",\"device_id\":\"%s\",\"temperature_c\":%.1f,\"vibration_mm_s\":%.1f,\"uptime_ms\":%lu}",

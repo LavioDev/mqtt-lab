@@ -21,10 +21,11 @@ from fastapi.staticfiles import StaticFiles
 
 
 MAX_PAYLOAD_BYTES = 64 * 1024
-MAX_MESSAGES = 200
+MAX_MESSAGES = 100
 MAX_TELEMETRY_POINTS = 120
 MAX_SSE_CLIENTS = 16
 SSE_QUEUE_SIZE = 100
+DEVICE_ACTIVE_WINDOW_SECONDS = 15
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
 
@@ -38,6 +39,8 @@ class Monitor:
         self.messages: deque[dict[str, Any]] = deque(maxlen=MAX_MESSAGES)
         self.telemetry: deque[dict[str, Any]] = deque(maxlen=MAX_TELEMETRY_POINTS)
         self.metrics: dict[str, int | float] = {}
+        self.device_last_seen: dict[str, tuple[float, str]] = {}
+        self.iot_publish_count = 0
         self.broker_connected = False
         self.broker_changed_at: str | None = None
         self.broker_stats_at: str | None = None
@@ -84,11 +87,23 @@ class Monitor:
                     "stats_at": self.broker_stats_at,
                 },
                 "metrics": dict(self.metrics),
+                "devices": self._device_stats_locked(time.monotonic()),
+                "iot_publish_count": self.iot_publish_count,
                 "telemetry_rate": self.telemetry_rate,
                 "last_message_at": self.last_message_at,
                 "messages": list(reversed(self.messages)),
                 "telemetry": list(self.telemetry),
             }
+
+    def _device_stats_locked(self, now: float) -> dict[str, int]:
+        active_count = sum(
+            1 for seen_at, _ in self.device_last_seen.values()
+            if now - seen_at <= DEVICE_ACTIVE_WINDOW_SECONDS
+        )
+        return {
+            "active_count": active_count,
+            "active_window_seconds": DEVICE_ACTIVE_WINDOW_SECONDS,
+        }
 
     def add_sse_client(self) -> asyncio.Queue[dict[str, Any] | None]:
         if len(self.sse_clients) >= MAX_SSE_CLIENTS:
@@ -218,16 +233,28 @@ class Monitor:
                     self.metrics[key] = value
                     self.broker_stats_at = utc_now()
                     metrics = dict(self.metrics)
+                    devices = self._device_stats_locked(time.monotonic())
                 self._emit("metrics", {"metrics": metrics, "stats_at": self.broker_stats_at})
+                self._emit("devices", devices)
             return
 
         received_at = utc_now()
         payload = self._decode_payload(message.payload)
+        decoded: dict[str, Any] | None = None
+        device_id: str | None = None
         telemetry_point = None
-        if message.topic == "factory/line-01/machine-01/telemetry" and payload["kind"] == "json" and not payload["truncated"]:
+        is_iot_publish = False
+        if payload["kind"] == "json" and not payload["truncated"]:
             try:
-                decoded = json.loads(payload["value"])
-                if isinstance(decoded, dict) and decoded.get("device_id") == "machine-01":
+                parsed = json.loads(payload["value"])
+                if isinstance(parsed, dict):
+                    decoded = parsed
+                    candidate = parsed.get("device_id")
+                    if isinstance(candidate, str) and candidate.strip() and len(candidate) <= 128:
+                        device_id = candidate.strip()
+                        is_iot_publish = message.topic.startswith("factory/")
+                if (message.topic == "factory/line-01/machine-01/telemetry"
+                        and decoded is not None and decoded.get("device_id") == "machine-01"):
                     temperature = decoded.get("temperature_c")
                     vibration = decoded.get("vibration_mm_s")
                     try:
@@ -252,6 +279,8 @@ class Monitor:
                 "id": self.sequence,
                 "received_at": received_at,
                 "topic": message.topic,
+                "packet_type": "PUBLISH",
+                "device_id": device_id,
                 "qos": int(message.qos),
                 "retained": bool(message.retain),
                 "payload": payload,
@@ -259,9 +288,15 @@ class Monitor:
             }
             self.messages.append(item)
             self.last_message_at = received_at
+            now = time.monotonic()
+            if device_id is not None:
+                self.device_last_seen[device_id] = (now, received_at)
+            if is_iot_publish:
+                self.iot_publish_count += 1
+            iot_publish_count = self.iot_publish_count
+            devices = self._device_stats_locked(now)
             if telemetry_point is not None:
                 self.telemetry.append(telemetry_point)
-                now = time.monotonic()
                 self.telemetry_times.append(now)
                 while self.telemetry_times and now - self.telemetry_times[0] > 10:
                     self.telemetry_times.popleft()
@@ -269,6 +304,9 @@ class Monitor:
                 self.telemetry_rate = (len(self.telemetry_times) - 1) / elapsed if elapsed > 0 else 0.0
             rate = self.telemetry_rate
         self._emit("message", item)
+        self._emit("devices", devices)
+        if is_iot_publish:
+            self._emit("iot_messages", {"count": iot_publish_count})
         if telemetry_point is not None:
             self._emit("rate", {"telemetry_rate": rate})
 

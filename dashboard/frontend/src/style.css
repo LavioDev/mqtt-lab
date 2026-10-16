@@ -12,3 +12,7 @@
 .stats-grid{margin-top:20px}
 @media(max-width:720px){.topbar{min-height:60px}.header-statuses{width:100%;display:grid;grid-template-columns:1fr 1fr;gap:7px}.header-statuses .status-pill{justify-content:center;padding:7px 5px;font-size:8px;letter-spacing:0}}
 @media(max-width:420px){.header-statuses .status-pill{padding:6px 3px;font-size:7px;gap:4px}}
+.traffic-hint{max-width:720px;color:#6b728a;font-size:10px;line-height:1.5;margin-top:6px}
+.traffic-panel .count-badge{height:auto;min-height:18px;padding:4px 7px;font-size:9px;white-space:nowrap}
+.packet-chip{display:inline-flex;padding:4px 6px;border:1px solid rgba(79,70,229,.16);border-radius:4px;background:rgba(79,70,229,.07);color:#4338ca;font:500 9px 'DM Mono',monospace}
+@media(max-width:720px){.traffic-hint{font-size:9px}.packet-chip{font-size:8px;padding:3px 4px}}
