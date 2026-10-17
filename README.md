@@ -18,6 +18,8 @@ Lab MQTT 3.1.1 trên Debian Linux/WSL, Mosquitto, firmware ESP32 DevKit và dash
 - [Realtime dashboard](docs/setup/04-dashboard.md)
 - [E00 baseline and PCAP analysis](docs/setup/05-baseline-pcap.md)
 
+Để hiểu luồng end-to-end từ ESP32 qua Mosquitto tới subscriber, PCAP và dashboard, xem [MQTT workflow](docs/mqtt-workflow.md). Tài liệu cũng giải thích TCP ACK và MQTT PUBACK trong Wireshark.
+
 ## Cấu trúc thư mục
 
 ```text
@@ -27,6 +29,7 @@ mqtt-lab/
 ├── dashboard/               # FastAPI backend and Vue frontend
 ├── docs/
 │   ├── plan.md              # Kế hoạch dự án
+│   ├── mqtt-workflow.md     # Luồng ESP32 → broker → subscriber/dashboard → PCAP
 │   ├── progress/            # Nhật ký tiến độ theo phase
 │   ├── protocol-analysis.md # Phân tích MQTT/PCAP
 │   └── setup/               # Hướng dẫn setup và chạy theo phần
