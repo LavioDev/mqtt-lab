@@ -96,8 +96,8 @@ Vue 3 + TypeScript (frontend), FastAPI + paho-mqtt (backend), đẩy dữ liệu
 Mở http://localhost:8081 (đổi bằng `DASHBOARD_PORT`). Chỉ dùng lệnh `lab`; đừng bấm Play/Stop trong Docker Desktop vì nó bỏ qua profile và file compose phụ.
 
 - Hai tab: **BROKER 1883 · PLAINTEXT** và **BROKER 8883 · TLS**, mỗi tab nối một broker riêng (API `?broker=plain|tls`). Firmware gửi vào cổng nào thì chỉ tab đó có dữ liệu.
-- Thẻ "Client đang kết nối": 1/0 firmware, suy ra từ việc còn nhận telemetry trong 10 giây gần nhất. Thẻ "Message firmware → broker": đếm bản tin trên topic telemetry kể từ khi dashboard khởi động.
-- Biểu đồ temperature/vibration và danh sách bản tin `factory/#`; lịch sử RAM tối đa 200 bản tin, 120 điểm/biểu đồ, restart backend sẽ xóa.
+- Thẻ "Thiết bị đang hoạt động": số `device_id` có telemetry trong 15 giây gần nhất; thẻ "IoT publish đã nhận": số bản tin PUBLISH trên `factory/#` kể từ khi dashboard khởi động. Bảng bản tin hiển thị tối đa 100 gói.
+- Biểu đồ temperature/vibration và danh sách bản tin `factory/#`; lịch sử RAM tối đa 100 bản tin, 120 điểm/biểu đồ, restart backend sẽ xóa.
 - Dashboard chỉ đọc; credential MQTT chỉ dùng ở backend; không có đăng nhập dashboard.
 
 Kiểm tra nhanh: `curl -fsS http://localhost:8081/healthz` và `curl -fsS "http://localhost:8081/api/state?broker=tls"`.
@@ -147,4 +147,4 @@ mqtt-lab/
 └── README.md
 ```
 
-Sơ đồ triển khai và phạm vi các phase: [docs/plan.md](docs/plan.md); tiến độ: [docs/progress/](docs/progress/).
+Luồng end-to-end từ ESP32 tới broker, subscriber, PCAP và dashboard (kèm TCP ACK vs MQTT PUBACK trong Wireshark): [docs/mqtt-workflow.md](docs/mqtt-workflow.md). Sơ đồ triển khai và phạm vi các phase: [docs/plan.md](docs/plan.md); tiến độ: [docs/progress/](docs/progress/).
