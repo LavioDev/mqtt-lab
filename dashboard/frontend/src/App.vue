@@ -10,6 +10,7 @@ type Message = {
   retained: boolean
   payload: { kind: 'json' | 'text' | 'base64'; value: string; truncated: boolean }
   telemetry: TelemetryPoint | null
+  from_firmware: boolean
 }
 type State = {
   broker: { connected: boolean; changed_at: string | null; stats_at: string | null }
@@ -18,12 +19,16 @@ type State = {
   last_message_at: string | null
   messages: Message[]
   telemetry: TelemetryPoint[]
+  firmware: { messages: number; last_seen_at: string | null }
 }
 
 const blankState = (): State => ({
   broker: { connected: false, changed_at: null, stats_at: null },
   metrics: {}, telemetry_rate: 0, last_message_at: null, messages: [], telemetry: [],
+  firmware: { messages: 0, last_seen_at: null },
 })
+const brokerId = ref<'plain' | 'tls'>('plain')
+const brokerTabs = [{ id: 'plain', label: 'BROKER 1883 · PLAINTEXT' }, { id: 'tls', label: 'BROKER 8883 · TLS' }] as const
 const state = ref<State>(blankState())
 const browserConnected = ref(false)
 const loaded = ref(false)
@@ -39,6 +44,14 @@ const filteredMessages = computed(() => {
 })
 const latestTelemetry = computed(() => state.value.telemetry.at(-1) ?? null)
 const metrics = computed(() => state.value.metrics)
+// No LWT/status topic in the firmware: treat it as connected while telemetry keeps arriving.
+const FIRMWARE_TIMEOUT_MS = 10_000
+const now = ref(Date.now())
+let clock: number | undefined
+const firmwareOnline = computed(() => {
+  const seen = state.value.firmware.last_seen_at
+  return !!seen && now.value - new Date(seen).getTime() < FIRMWARE_TIMEOUT_MS
+})
 
 function applySnapshot(snapshot: State) {
   state.value = snapshot
@@ -54,7 +67,7 @@ function scrollTable() {
 }
 
 function connectEvents() {
-  const source = new EventSource('/api/events')
+  const source = new EventSource(`/api/events?broker=${brokerId.value}`)
   eventSource.value = source
   source.onopen = () => { browserConnected.value = true }
   source.onerror = () => { browserConnected.value = false }
@@ -65,6 +78,9 @@ function connectEvents() {
     const item = JSON.parse((event as MessageEvent).data) as Message
     state.value.messages = [item, ...state.value.messages].slice(0, 200)
     state.value.last_message_at = item.received_at
+    if (item.from_firmware) {
+      state.value.firmware = { messages: state.value.firmware.messages + 1, last_seen_at: item.received_at }
+    }
     if (item.telemetry) state.value.telemetry = [...state.value.telemetry, item.telemetry].slice(-120)
     scrollTable()
   })
@@ -80,6 +96,16 @@ function connectEvents() {
   source.addEventListener('rate', (event) => {
     state.value.telemetry_rate = (JSON.parse((event as MessageEvent).data) as { telemetry_rate: number }).telemetry_rate
   })
+}
+
+function selectBroker(id: 'plain' | 'tls') {
+  if (id === brokerId.value) return
+  eventSource.value?.close()
+  brokerId.value = id
+  state.value = blankState()
+  selectedMessage.value = null
+  loaded.value = false
+  connectEvents()
 }
 
 function formatTime(value: string | null | undefined) {
@@ -136,8 +162,8 @@ function chartLast(key: 'temperature_c' | 'vibration_mm_s') {
   return formatNumber(latestTelemetry.value[key])
 }
 
-onMounted(connectEvents)
-onUnmounted(() => eventSource.value?.close())
+onMounted(() => { connectEvents(); clock = window.setInterval(() => { now.value = Date.now() }, 1000) })
+onUnmounted(() => { eventSource.value?.close(); window.clearInterval(clock) })
 </script>
 
 <template>
@@ -159,11 +185,16 @@ onUnmounted(() => eventSource.value?.close())
       </div>
     </header>
 
+    <div class="broker-tabs" role="tablist" aria-label="Chọn broker">
+      <button v-for="tab in brokerTabs" :key="tab.id" type="button" role="tab" :class="{ active: brokerId === tab.id }"
+        :aria-selected="brokerId === tab.id" @click="selectBroker(tab.id)">{{ tab.label }}</button>
+    </div>
+
     <section class="stats-grid" aria-label="Thống kê broker">
       <article class="stat-card accent-cyan">
         <div class="stat-label">CLIENT ĐANG KẾT NỐI <span class="stat-symbol">◉</span></div>
-        <div class="stat-value">{{ formatNumber(metrics.clients_connected) }}<small> clients</small></div>
-        <div class="stat-foot">Bao gồm dashboard monitor</div>
+        <div class="stat-value">{{ firmwareOnline ? 1 : 0 }}<small> firmware</small></div>
+        <div class="stat-foot">Chỉ thiết bị firmware (suy ra từ telemetry ≤ 10 giây)</div>
       </article>
       <article class="stat-card accent-violet">
         <div class="stat-label">BROKER UPTIME <span class="stat-symbol">◷</span></div>
@@ -171,9 +202,9 @@ onUnmounted(() => eventSource.value?.close())
         <div class="stat-foot">Mosquitto · MQTT 3.1.1</div>
       </article>
       <article class="stat-card accent-blue">
-        <div class="stat-label">MESSAGE NHẬN / GỬI <span class="stat-symbol">⇄</span></div>
-        <div class="stat-value">{{ formatNumber(metrics.messages_received_total) }}<small> / {{ formatNumber(metrics.messages_sent_total) }}</small></div>
-        <div class="stat-foot">Tổng từ khi broker khởi động</div>
+        <div class="stat-label">MESSAGE FIRMWARE → BROKER <span class="stat-symbol">⇄</span></div>
+        <div class="stat-value">{{ formatNumber(state.firmware.messages) }}<small> msg</small></div>
+        <div class="stat-foot">Chỉ gói tin firmware gửi tới broker, từ khi dashboard khởi động</div>
       </article>
       <article class="stat-card accent-orange">
         <div class="stat-label">TELEMETRY OBSERVED <span class="stat-symbol">⌁</span></div>

@@ -9,3 +9,5 @@ __pycache__/
 *.pyc
 **/node_modules/
 dashboard/frontend/dist/
+firmware/build/
+config/mosquitto/certs/

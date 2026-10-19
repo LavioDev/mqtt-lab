@@ -4,9 +4,17 @@ x-client: &client
   image: mqtt-lab-client:phase1
   build:
     context: .
-    dockerfile: lab_clients/Dockerfile
-  env_file: .env
+    dockerfile: docker/lab-client/Dockerfile
+  # Explicit vars (not env_file) so nested compose from the tools container resolves them via --env-file.
   environment:
+    SENSOR_USERNAME: ${SENSOR_USERNAME:-}
+    SENSOR_PASSWORD: ${SENSOR_PASSWORD:-}
+    SUBSCRIBER_USERNAME: ${SUBSCRIBER_USERNAME:-}
+    SUBSCRIBER_PASSWORD: ${SUBSCRIBER_PASSWORD:-}
+    TEST_CLIENT_USERNAME: ${TEST_CLIENT_USERNAME:-}
+    TEST_CLIENT_PASSWORD: ${TEST_CLIENT_PASSWORD:-}
+    MONITOR_USERNAME: ${MONITOR_USERNAME:-}
+    MONITOR_PASSWORD: ${MONITOR_PASSWORD:-}
     MQTT_HOST: broker
     MQTT_PORT: "1883"
     RUN_ID: ${RUN_ID:-manual}
@@ -31,18 +39,30 @@ services:
     security_opt:
       - no-new-privileges:true
 
+  broker_tls:
+    image: eclipse-mosquitto:2.1.2-alpine
+    command: ["mosquitto", "-c", "/mosquitto/config/mosquitto-tls.conf"]
+    volumes:
+      - ./config/mosquitto:/mosquitto/config:ro
+    networks:
+      - lab
+    security_opt:
+      - no-new-privileges:true
+
   subscriber:
     <<: *client
     command: ["python", "-m", "lab_clients.subscriber"]
 
   test_client:
     <<: *client
-    volumes: []
+    volumes:
+      - ./config/mosquitto/certs/ca.crt:/certs/ca.crt:ro
     command: ["python", "-m", "lab_clients.test_client", "probe"]
 
   capture:
     build:
-      context: ./capture
+      context: .
+      dockerfile: docker/capture/Dockerfile
     image: mqtt-lab-capture:phase1
     network_mode: service:broker
     depends_on:
@@ -67,17 +87,23 @@ services:
     profiles: [dashboard]
     build:
       context: .
-      dockerfile: dashboard/Dockerfile
+      dockerfile: docker/dashboard/Dockerfile
     image: mqtt-lab-dashboard:phase1
     environment:
       MQTT_HOST: broker
       MQTT_PORT: "1883"
+      MQTT_TLS_HOST: broker_tls
+      MQTT_TLS_PORT: "8883"
+      MQTT_TLS_CA: /certs/ca.crt
       MQTT_USERNAME: ${MONITOR_USERNAME:-monitor}
-      MQTT_PASSWORD: ${MONITOR_PASSWORD:?Run python3 scripts/init_lab.py first}
+      MQTT_PASSWORD: ${MONITOR_PASSWORD:?Run ./lab.sh init (or .\lab.ps1 init) first}
+    volumes:
+      - ./config/mosquitto/certs/ca.crt:/certs/ca.crt:ro
     networks:
       - lab
     depends_on:
       - broker
+      - broker_tls
     read_only: true
     tmpfs:
       - /tmp

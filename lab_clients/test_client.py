@@ -27,6 +27,8 @@ def main() -> None:
         clean_session=True,
         protocol=mqtt.MQTTv311,
     )
+    if os.environ.get("MQTT_TLS_CA"):
+        client.tls_set(ca_certs=os.environ["MQTT_TLS_CA"])
     if mode == "telemetry-smoke":
         client.username_pw_set(required("SENSOR_USERNAME"), required("SENSOR_PASSWORD"))
     elif mode not in {"anonymous", "monitor-probe"}:

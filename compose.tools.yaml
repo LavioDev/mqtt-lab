@@ -1,0 +1,39 @@
+# Entry point for the Docker-only workflow. Use ./lab.sh or .\lab.ps1 rather than calling this directly.
+name: mqtt-lab-tools
+
+services:
+  tools:
+    build:
+      context: .
+      dockerfile: docker/tools/Dockerfile
+    image: mqtt-lab-tools:phase1
+    # The repo is mounted at its own host path so nested `docker compose` finds build contexts
+    # (client side) and the host daemon resolves bind mounts (daemon side) with the same path.
+    working_dir: ${HOST_PROJECT_DIR:?Use ./lab.sh or .\lab.ps1}
+    entrypoint: ["python"]
+    environment:
+      DASHBOARD_PORT: ${DASHBOARD_PORT:-8081}
+    volumes:
+      - .:${HOST_PROJECT_DIR}
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  firmware:
+    build:
+      context: .
+      dockerfile: docker/firmware/Dockerfile
+    image: mqtt-lab-firmware:phase1
+    working_dir: /workspace
+    volumes:
+      - ./firmware/mqtt_sensor:/workspace/mqtt_sensor
+      - ./firmware/build:/workspace/build
+      - arduino_cache:/root/.arduino15
+
+  flash:
+    extends: firmware
+    profiles: [flash]
+    devices:
+      - "${SERIAL_PORT:-/dev/ttyUSB0}:${SERIAL_PORT:-/dev/ttyUSB0}"
+    entrypoint: ["arduino-cli", "upload", "-p", "${SERIAL_PORT:-/dev/ttyUSB0}", "--fqbn", "esp32:esp32:esp32", "--input-dir", "/workspace/build", "mqtt_sensor"]
+
+volumes:
+  arduino_cache: {}

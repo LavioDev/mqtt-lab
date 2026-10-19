@@ -6,5 +6,12 @@ services:
       - lab
       - firmware_edge
 
+  broker_tls:
+    ports:
+      - "${BROKER_BIND_IP:-127.0.0.1}:8883:8883"
+    networks:
+      - lab
+      - firmware_edge
+
 networks:
   firmware_edge: {}

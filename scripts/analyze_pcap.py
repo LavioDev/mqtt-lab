@@ -25,8 +25,7 @@ def main() -> int:
     if not pcap.is_file():
         parser.error(f"PCAP not found: {pcap}")
     command = [
-        "docker", "run", "--rm", "--network", "none", "-v", f"{pcap.resolve()}:/capture.pcap:ro",
-        "mqtt-lab-capture:phase1", "tshark", "-r", "/capture.pcap", "-Y", "mqtt",
+        "tshark", "-r", str(pcap), "-Y", "mqtt",
         "-T", "fields", "-E", "separator=,", "-E", "quote=d", "-E", "occurrence=f",
         "-e", "frame.number", "-e", "frame.time_epoch", "-e", "ip.src", "-e", "ip.dst",
         "-e", "mqtt.msgtype", "-e", "mqtt.clientid", "-e", "mqtt.topic",

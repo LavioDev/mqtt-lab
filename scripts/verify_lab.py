@@ -10,6 +10,8 @@ import subprocess
 import time
 from pathlib import Path
 
+from labcompose import compose as compose_argv
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -23,10 +25,10 @@ def run(argv: list[str], env: dict[str, str], *, check: bool = True, timeout: in
 
 def main() -> None:
     if not (ROOT / ".env").is_file() or not (ROOT / "config/mosquitto/auth/passwords").is_file():
-        raise RuntimeError("Run python3 scripts/init_lab.py first")
+        raise RuntimeError("Run ./lab.sh init first")
     env = os.environ.copy()
-    env.update(RUN_ID=f"VERIFY-{secrets.token_hex(3)}", LOCAL_UID=str(os.getuid()), LOCAL_GID=str(os.getgid()))
-    compose = ["docker", "compose", "-p", f"mqtt-lab-{env['RUN_ID'].lower()}"]
+    env.update(RUN_ID=f"VERIFY-{secrets.token_hex(3)}")
+    compose = compose_argv(project=f"mqtt-lab-{env['RUN_ID'].lower()}")
     configuration = json.loads(run(compose + ["config", "--format", "json"], env))
     if not configuration["networks"]["lab"]["internal"]:
         raise RuntimeError("Lab network is not internal")
@@ -35,7 +37,7 @@ def main() -> None:
     print("Network is internal; broker has no published port", flush=True)
     try:
         run(compose + ["build", "test_client"], env, timeout=600)
-        run(compose + ["up", "-d", "broker"], env)
+        run(compose + ["up", "-d", "broker", "broker_tls"], env)
         for attempt in range(10):
             try:
                 output = run(compose + ["run", "--rm", "test_client"], env, timeout=30)
@@ -47,6 +49,11 @@ def main() -> None:
                     raise
                 time.sleep(1)
         print("Valid test account accepted", flush=True)
+        output = run(compose + ["run", "--rm", "-e", "MQTT_HOST=broker_tls", "-e", "MQTT_PORT=8883", "-e", "MQTT_TLS_CA=/certs/ca.crt",
+                                "test_client"], env, timeout=30)
+        if "PROBE_OK" not in output:
+            raise RuntimeError(f"TLS (8883) probe failed: {output[-1000:]}")
+        print("TLS listener 8883 accepted valid account with CA-verified certificate", flush=True)
         for mode, marker in (("anonymous", "EXPECTED_AUTH_REJECTION"),
                              ("wrong-password", "EXPECTED_AUTH_REJECTION"),
                              ("acl-deny", "ACL_TEST_PUBLISH_SENT")):

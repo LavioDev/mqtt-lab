@@ -3,10 +3,12 @@
 .runtime/
 firmware/mqtt_sensor/firmware_config.h
 config/mosquitto/auth/
-data/raw/
+data/
 __pycache__/
 *.py[cod]
 .pytest_cache/
 dashboard/frontend/node_modules/
 dashboard/frontend/dist/
 
+firmware/build/
+config/mosquitto/certs/

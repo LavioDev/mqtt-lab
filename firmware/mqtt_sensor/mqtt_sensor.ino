@@ -1,10 +1,19 @@
 #include <ArduinoMqttClient.h>
 #include <WiFi.h>
+#include <time.h>
 #include <cstring>
 
 #include "firmware_config.h"
 
+#if MQTT_TLS
+#include <WiFiClientSecure.h>
+#endif
+
+#if MQTT_TLS
+WiFiClientSecure networkClient;
+#else
 WiFiClient networkClient;
+#endif
 MqttClient mqttClient(networkClient);
 
 unsigned long lastPublishMs = 0;
@@ -24,9 +33,27 @@ void connectWiFi() {
   Serial.printf("\nWi-Fi connected; IP=%s\n", WiFi.localIP().toString().c_str());
 }
 
+#if MQTT_TLS
+// Certificate validity checks need a real clock.
+void syncClock() {
+  if (time(nullptr) > 1700000000) return;
+  configTime(0, 0, "pool.ntp.org", "time.google.com");
+  Serial.print("Syncing clock");
+  for (int i = 0; i < 60 && time(nullptr) < 1700000000; ++i) {
+    delay(500);
+    Serial.print('.');
+  }
+  Serial.println();
+}
+#endif
+
 void connectMqtt() {
   while (!mqttClient.connected()) {
     connectWiFi();
+#if MQTT_TLS
+    syncClock();
+    networkClient.setCACert(MQTT_CA_CERT);
+#endif
     mqttClient.setId(MQTT_CLIENT_ID);
     mqttClient.setUsernamePassword(MQTT_USERNAME, MQTT_PASSWORD);
 

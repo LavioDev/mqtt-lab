@@ -24,6 +24,7 @@ MAX_PAYLOAD_BYTES = 64 * 1024
 MAX_MESSAGES = 200
 MAX_TELEMETRY_POINTS = 120
 MAX_SSE_CLIENTS = 16
+FIRMWARE_TOPIC = "factory/line-01/machine-01/telemetry"
 SSE_QUEUE_SIZE = 100
 STATIC_DIR = Path(__file__).resolve().parent / "static"
 
@@ -33,7 +34,8 @@ def utc_now() -> str:
 
 
 class Monitor:
-    def __init__(self) -> None:
+    def __init__(self, name: str, host: str, port: int, tls_ca: str | None = None) -> None:
+        self.name, self.host, self.port, self.tls_ca = name, host, port, tls_ca
         self.lock = threading.RLock()
         self.messages: deque[dict[str, Any]] = deque(maxlen=MAX_MESSAGES)
         self.telemetry: deque[dict[str, Any]] = deque(maxlen=MAX_TELEMETRY_POINTS)
@@ -42,6 +44,8 @@ class Monitor:
         self.broker_changed_at: str | None = None
         self.broker_stats_at: str | None = None
         self.last_message_at: str | None = None
+        self.firmware_messages = 0
+        self.firmware_last_seen_at: str | None = None
         self.sequence = 0
         self.telemetry_times: deque[float] = deque()
         self.telemetry_rate = 0.0
@@ -53,19 +57,21 @@ class Monitor:
         self.loop = asyncio.get_running_loop()
         client = mqtt.Client(
             mqtt.CallbackAPIVersion.VERSION2,
-            client_id="mqtt-lab-dashboard",
+            client_id=f"mqtt-lab-dashboard-{self.name}",
             protocol=mqtt.MQTTv311,
         )
         client.username_pw_set(
             os.environ["MQTT_USERNAME"], os.environ["MQTT_PASSWORD"]
         )
+        if self.tls_ca:
+            client.tls_set(ca_certs=self.tls_ca)
         client.reconnect_delay_set(min_delay=1, max_delay=30)
         client.on_connect = self._on_connect
         client.on_disconnect = self._on_disconnect
         client.on_message = self._on_message
         self.client = client
         client.connect_async(
-            os.getenv("MQTT_HOST", "broker"), int(os.getenv("MQTT_PORT", "1883")), keepalive=30
+            self.host, self.port, keepalive=30
         )
         client.loop_start()
 
@@ -86,6 +92,7 @@ class Monitor:
                 "metrics": dict(self.metrics),
                 "telemetry_rate": self.telemetry_rate,
                 "last_message_at": self.last_message_at,
+                "firmware": {"messages": self.firmware_messages, "last_seen_at": self.firmware_last_seen_at},
                 "messages": list(reversed(self.messages)),
                 "telemetry": list(self.telemetry),
             }
@@ -256,9 +263,14 @@ class Monitor:
                 "retained": bool(message.retain),
                 "payload": payload,
                 "telemetry": telemetry_point,
+                # Only the firmware publishes this topic (ACL); used for the firmware-only counters.
+                "from_firmware": message.topic == FIRMWARE_TOPIC,
             }
             self.messages.append(item)
             self.last_message_at = received_at
+            if item["from_firmware"]:
+                self.firmware_messages += 1
+                self.firmware_last_seen_at = received_at
             if telemetry_point is not None:
                 self.telemetry.append(telemetry_point)
                 now = time.monotonic()
@@ -273,14 +285,26 @@ class Monitor:
             self._emit("rate", {"telemetry_rate": rate})
 
 
-monitor = Monitor()
+monitors = {
+    "plain": Monitor("plain", os.getenv("MQTT_HOST", "broker"), int(os.getenv("MQTT_PORT", "1883"))),
+    "tls": Monitor("tls", os.getenv("MQTT_TLS_HOST", "broker_tls"), int(os.getenv("MQTT_TLS_PORT", "8883")),
+                   os.getenv("MQTT_TLS_CA", "/certs/ca.crt")),
+}
+
+
+def pick(broker: str) -> Monitor:
+    if broker not in monitors:
+        raise HTTPException(status_code=404, detail="Broker không tồn tại")
+    return monitors[broker]
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    monitor.start()
+    for monitor in monitors.values():
+        monitor.start()
     yield
-    monitor.stop()
+    for monitor in monitors.values():
+        monitor.stop()
 
 
 app = FastAPI(title="MQTT LAB Dashboard", lifespan=lifespan)
@@ -288,16 +312,17 @@ app = FastAPI(title="MQTT LAB Dashboard", lifespan=lifespan)
 
 @app.get("/healthz")
 async def healthz() -> dict[str, Any]:
-    return {"ok": True, "broker_connected": monitor.state()["broker"]["connected"]}
+    return {"ok": True, "brokers": {name: m.state()["broker"]["connected"] for name, m in monitors.items()}}
 
 
 @app.get("/api/state")
-async def get_state() -> dict[str, Any]:
-    return monitor.state()
+async def get_state(broker: str = "plain") -> dict[str, Any]:
+    return pick(broker).state()
 
 
 @app.get("/api/events")
-async def events(request: Request) -> StreamingResponse:
+async def events(request: Request, broker: str = "plain") -> StreamingResponse:
+    monitor = pick(broker)
     queue = monitor.add_sse_client()
 
     async def stream():

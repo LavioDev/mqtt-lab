@@ -51,6 +51,9 @@ def parse_env(path: Path) -> dict[str, str]:
         raise ValueError("Replace placeholder values: " + ", ".join(placeholders))
     if not values["MQTT_PORT"].isdigit() or not 1 <= int(values["MQTT_PORT"]) <= 65535:
         raise ValueError("MQTT_PORT must be an integer from 1 to 65535")
+    values.setdefault("MQTT_TLS", "0")
+    if values["MQTT_TLS"] not in {"0", "1"}:
+        raise ValueError("MQTT_TLS must be 0 or 1")
     if values["MQTT_QOS"] not in {"0", "1"}:
         raise ValueError("MQTT_QOS must be 0 or 1 (ArduinoMqttClient supports QoS 0/1)")
     if not values["PUBLISH_INTERVAL_MS"].isdigit() or int(values["PUBLISH_INTERVAL_MS"]) < 100:
@@ -67,6 +70,10 @@ def main() -> None:
     if not ENV_FILE.is_file():
         raise SystemExit("Missing .env.firmware; copy .env.firmware.example and fill in its values")
     values = parse_env(ENV_FILE)
+    ca_file = ROOT / "config" / "mosquitto" / "certs" / "ca.crt"
+    if values["MQTT_TLS"] == "1" and not ca_file.is_file():
+        raise SystemExit("MQTT_TLS=1 but config/mosquitto/certs/ca.crt is missing; run: lab init")
+    ca_pem = ca_file.read_text(encoding="utf-8") if values["MQTT_TLS"] == "1" else ""
     lines = [
         "#pragma once",
         "// Generated from .env.firmware. This file is ignored by Git.",
@@ -78,9 +85,11 @@ def main() -> None:
         f"#define MQTT_PASSWORD {cpp_string(values['MQTT_PASSWORD'])}",
         f"#define MQTT_CLIENT_ID {cpp_string(values['MQTT_CLIENT_ID'])}",
         f"#define MQTT_TOPIC {cpp_string(values['MQTT_TOPIC'])}",
+        f"#define MQTT_TLS {int(values['MQTT_TLS'])}",
         f"#define MQTT_QOS {int(values['MQTT_QOS'])}",
         f"#define PUBLISH_INTERVAL_MS {int(values['PUBLISH_INTERVAL_MS'])}UL",
         f"#define DEVICE_ID {cpp_string(values['DEVICE_ID'])}",
+        f"#define MQTT_CA_CERT {cpp_string(ca_pem)}",
         "",
     ]
     OUTPUT.write_text("\n".join(lines), encoding="utf-8")

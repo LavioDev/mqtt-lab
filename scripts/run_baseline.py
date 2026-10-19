@@ -14,6 +14,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from labcompose import compose as compose_argv
+
 
 ROOT = Path(__file__).resolve().parents[1]
 RAW_DIR = ROOT / "data" / "raw"
@@ -61,15 +63,16 @@ def main() -> int:
             parser.error(f"Missing {required_file.name}; configure the lab and firmware first")
 
     env = os.environ.copy()
-    env.update(RUN_ID=run_id, LOCAL_UID=str(os.getuid()), LOCAL_GID=str(os.getgid()))
+    env.update(RUN_ID=run_id)
     project = f"mqtt-lab-{run_id.lower().replace('_', '-')}"
-    compose = ["docker", "compose", "--env-file", ".env", "--env-file", ".env.firmware",
-               "-f", "compose.yaml", "-f", "compose.firmware.yaml", "-p", project]
+    compose = compose_argv("compose.yaml", "compose.firmware.yaml",
+                           env_files=(".env", ".env.firmware"), project=project)
     command(["docker", "version"], env, timeout=15)
     command(compose + ["config", "--quiet"], env, timeout=15)
 
     folder = RAW_DIR / run_id
     folder.mkdir(parents=True, exist_ok=False)
+    folder.chmod(0o777)  # clients run as uid 1000
     manifest = {
         "run_id": run_id, "scenario_id": "E00", "label": "esp32-firmware-baseline",
         "mqtt_version": "3.1.1", "transport": "plaintext", "source": "ESP32 DevKit firmware",
@@ -82,7 +85,7 @@ def main() -> int:
     print(f"Run {run_id}: building observer/capture images and starting firmware broker", flush=True)
     try:
         command(compose + ["build", "subscriber", "test_client", "capture"], env, timeout=600)
-        command(compose + ["up", "-d", "broker"], env)
+        command(compose + ["up", "-d", "broker", "broker_tls"], env)
         for attempt in range(10):
             try:
                 probe = command(compose + ["run", "--rm", "test_client"], env, timeout=30)
