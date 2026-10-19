@@ -2,6 +2,8 @@
 .env.firmware
 .runtime/
 firmware/mqtt_sensor/firmware_config.h
+firmware/mqtt_sensor_tls/firmware_config.h
+firmware/mqtt_sensor_tls/ca_cert.h
 config/mosquitto/auth/
 data/raw/
 __pycache__/

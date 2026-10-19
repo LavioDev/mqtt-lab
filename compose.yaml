@@ -61,7 +61,7 @@ services:
     command:
       - sh
       - -c
-      - exec tcpdump -i eth0 -p -Z root -s 0 -U -w "/artifacts/$${RUN_ID}/baseline.pcap" 'tcp port 1883'
+      - exec tcpdump -i eth0 -p -Z root -s 0 -U -w "/artifacts/$${RUN_ID}/baseline.pcap" 'tcp port 1883 or tcp port 8883'
 
   dashboard:
     profiles: [dashboard]

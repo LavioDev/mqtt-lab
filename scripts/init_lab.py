@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import os
 import re
 import secrets
@@ -16,6 +17,7 @@ ENV_FILE = ROOT / ".env"
 AUTH_DIR = ROOT / "config" / "mosquitto" / "auth"
 PASSWORD_FILE = AUTH_DIR / "passwords"
 ACL_FILE = AUTH_DIR / "acl.conf"
+TLS_DIR = AUTH_DIR / "tls"
 USERS = ("SENSOR", "SUBSCRIBER", "TEST_CLIENT", "MONITOR")
 
 
@@ -38,6 +40,61 @@ def ensure_monitor_credentials() -> None:
             handle.write("\n# Read-only MQTT account used by the local dashboard\n")
             handle.write("\n".join(additions) + "\n")
         ENV_FILE.chmod(0o600)
+
+
+def openssl(*args: str) -> str:
+    result = subprocess.run(["openssl", *args], capture_output=True, text=True)
+    if result.returncode:
+        raise RuntimeError(f"openssl {args[0]} failed: {result.stderr[-500:]}")
+    return result.stdout
+
+
+def firmware_host() -> str:
+    path = ROOT / ".env.firmware"
+    if path.is_file():
+        for line in path.read_text(encoding="utf-8").splitlines():
+            key, _, value = line.partition("=")
+            if key.strip() == "MQTT_HOST" and value.strip():
+                return value.strip().strip("'\"")
+    return ""
+
+
+def ensure_tls() -> None:
+    """Create the lab CA once, and a server cert whose SAN covers the firmware's MQTT_HOST."""
+    TLS_DIR.mkdir(parents=True, exist_ok=True)
+    ca_key, ca_crt = TLS_DIR / "ca.key", TLS_DIR / "ca.crt"
+    server_key, server_crt = TLS_DIR / "server.key", TLS_DIR / "server.crt"
+    if not (ca_key.exists() and ca_crt.exists()):
+        openssl("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-days", "3650",
+                "-keyout", str(ca_key), "-out", str(ca_crt), "-subj", "/CN=mqtt-lab-ca",
+                "-addext", "basicConstraints=critical,CA:TRUE",
+                "-addext", "keyUsage=critical,keyCertSign,cRLSign")
+        ca_key.chmod(0o600)
+        print("Created lab CA in config/mosquitto/auth/tls/")
+    host = firmware_host()
+    try:
+        ipaddress.ip_address(host)
+        names = [f"IP:{host}", f"DNS:{host}"]  # old mbedtls on ESP32 may only match dNSName/CN
+    except ValueError:
+        names = [f"DNS:{host}"] if host else []
+    names += ["DNS:localhost", "DNS:broker", "IP:127.0.0.1"]
+    if server_crt.exists() and server_key.exists():
+        san = openssl("x509", "-in", str(server_crt), "-noout", "-ext", "subjectAltName").splitlines()[-1]
+        if set(names) <= {item.strip().replace("IP Address:", "IP:") for item in san.split(",")}:
+            return
+    csr, ext = TLS_DIR / "server.csr", TLS_DIR / "server.ext"
+    server_key.unlink(missing_ok=True)
+    ext.write_text("subjectAltName=" + ",".join(names) + "\nextendedKeyUsage=serverAuth\n", encoding="utf-8")
+    try:
+        openssl("req", "-newkey", "rsa:2048", "-nodes", "-keyout", str(server_key), "-out", str(csr),
+                "-subj", f"/CN={host or 'broker'}")
+        openssl("x509", "-req", "-in", str(csr), "-CA", str(ca_crt), "-CAkey", str(ca_key),
+                "-CAcreateserial", "-out", str(server_crt), "-days", "3650", "-extfile", str(ext))
+    finally:
+        csr.unlink(missing_ok=True)
+        ext.unlink(missing_ok=True)
+    server_key.chmod(0o600)
+    print(f"Issued broker TLS certificate for: {', '.join(names)}")
 
 
 def read_env() -> dict[str, str]:
@@ -76,6 +133,7 @@ def main() -> None:
     if ENV_FILE.exists():
         ENV_FILE.chmod(0o600)
     values = read_env()
+    ensure_tls()
     if args.credentials_only:
         print("Credential file ready; run again without --credentials-only when Docker is available")
         return
@@ -117,7 +175,7 @@ def main() -> None:
     temporary_acl.replace(ACL_FILE)
     command = ["docker", "run", "--rm", "-v", f"{AUTH_DIR}:/auth", "--entrypoint", "sh",
                "eclipse-mosquitto:2.1.2-alpine", "-c",
-               "chown 1883:1883 /auth/passwords /auth/acl.conf && chmod 600 /auth/passwords /auth/acl.conf"]
+               "chown 1883:1883 /auth/passwords /auth/acl.conf /auth/tls/server.key && chmod 600 /auth/passwords /auth/acl.conf /auth/tls/server.key"]
     result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True)
     if result.returncode:
         raise RuntimeError(f"Could not set broker file permissions: {result.stderr[-500:]}")

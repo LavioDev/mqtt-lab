@@ -1,0 +1,4 @@
+#pragma once
+
+// Generated from .env.firmware by scripts/generate_firmware_config.py --tls.
+// Do not put real credentials in this tracked example.

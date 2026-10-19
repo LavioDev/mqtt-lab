@@ -126,3 +126,7 @@ Trong capture Wi-Fi ngày 17/10/2026, luồng telemetry có source `192.168.100.
 - ACL deny cần đối chiếu broker log. Đừng kết luận quyền được cho phép chỉ từ SUBACK trong MQTT 3.1.1.
 - Telemetry không đến không đồng nghĩa thiết bị offline: có thể capture sai interface, broker/firewall không tới được, hoặc subscriber chưa sẵn sàng.
 - Chỉ thử trên broker, thiết bị và mạng thuộc lab; giữ port 1883 giới hạn trong LAN cần thiết, không bind ra `0.0.0.0`, không dùng mật khẩu thật.
+
+## Biến thể TLS (cổng 8883)
+
+Bản `firmware/mqtt_sensor_tls` gửi cùng telemetry tới broker qua TCP 8883 với TLS 1.2+; `tcpdump` ghi cả port 1883 và 8883. Trong Wireshark dùng `tcp.port == 8883`: thấy Client Hello/Server Hello và Application Data, nhưng topic/payload/CONNECT không đọc được. Xem [02 — Broker](setup/02-broker.md) và [03 — Firmware](setup/03-esp32-firmware.md).

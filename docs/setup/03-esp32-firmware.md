@@ -105,3 +105,15 @@ Khởi chạy broker và dashboard cho LAN:
 Mở dashboard tại `http://localhost:8081`. Nếu chỉ thu PCAP, dùng `./run.sh` và reset ESP32 khi runner báo capture đã sẵn sàng. Firewall máy host cần cho phép TCP/1883 trên giao diện mạng lab. MQTT không mã hóa; chỉ dùng mạng thử nghiệm riêng.
 
 Khi xong, dừng dashboard bằng `./run.sh dashboard stop`; dừng cả broker bằng lệnh `docker compose ... down` tại [02 — Broker](02-broker.md).
+
+## Bản firmware TLS (cổng 8883)
+
+`firmware/mqtt_sensor_tls` giống bản plaintext nhưng kết nối `MQTT_HOST:MQTT_TLS_PORT` (mặc định 8883) qua `WiFiClientSecure` và xác thực broker bằng `ca_cert.h` chứa CA của lab. Chạy `python3 scripts/init_lab.py` trước để có CA, rồi:
+
+```bash
+python3 scripts/generate_firmware_config.py --tls
+arduino-cli compile --fqbn esp32:esp32:esp32 firmware/mqtt_sensor_tls
+arduino-cli upload -p /dev/ttyUSB0 --fqbn esp32:esp32:esp32 firmware/mqtt_sensor_tls
+```
+
+ESP32 đồng bộ giờ qua NTP (`pool.ntp.org`, đổi bằng `#define NTP_SERVER` trong `firmware_config.h`) để mbedtls kiểm hạn chứng chỉ; Wi‑Fi lab cần ra Internet hoặc có NTP server trong LAN. `ca_cert.h` và `firmware_config.h` của bản TLS bị Git bỏ qua.

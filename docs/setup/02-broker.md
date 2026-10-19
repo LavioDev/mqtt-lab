@@ -41,3 +41,13 @@ Với override firmware:
 docker compose --env-file .env --env-file .env.firmware \
   -f compose.yaml -f compose.firmware.yaml down
 ```
+
+## Listener TLS 8883
+
+`python3 scripts/init_lab.py` tạo CA tự ký (`ca.crt`/`ca.key`) một lần và chứng chỉ broker (`server.crt`/`server.key`) trong `config/mosquitto/auth/tls/` (bị Git bỏ qua). SAN của chứng chỉ gồm `localhost`, `broker`, `127.0.0.1` và `MQTT_HOST` trong `.env.firmware`; đổi `MQTT_HOST` rồi chạy lại script sẽ cấp lại chứng chỉ broker mà vẫn giữ CA. Listener 8883 dùng TLS 1.2+ cùng user/password và ACL như cổng 1883; override firmware bind 8883 vào `BROKER_BIND_IP`. Kiểm tra:
+
+```bash
+openssl s_client -connect "$BROKER_BIND_IP:8883" -CAfile config/mosquitto/auth/tls/ca.crt -verify_return_error </dev/null
+```
+
+Chỉ dùng cho test: private key của CA nằm cùng máy với broker.

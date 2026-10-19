@@ -33,3 +33,7 @@ TCP có thể chia một MQTT message thành nhiều segment. Wireshark thườn
 - Thông báo `Unknown Version (missing the CONNECT packet?)` có thể xuất hiện khi bắt đầu capture sau handshake MQTT. Nó không tự nó chứng minh PUBLISH sai. Bắt đầu capture trước khi ESP32 kết nối nếu cần phân tích cả CONNECT/CONNACK.
 - Port `1883` không mã hóa MQTT. PCAP có thể chứa topic, payload và dữ liệu xác thực từ CONNECT; không chia sẻ PCAP chưa rà soát.
 - Wireshark trên Windows phù hợp để học và xem PCAP. Với baseline có thể tái lập của lab, dùng capture trong network namespace của broker rồi mở PCAP bằng Wireshark.
+
+## Luồng TLS (cổng 8883)
+
+Dùng `tcp.port == 8883` (hoặc `tls`) để xem handshake TLS của bản `mqtt_sensor_tls`; payload MQTT được mã hóa nên không có dòng `mqtt`. Port 8883 cũng chỉ nên bind vào IP LAN của lab.
