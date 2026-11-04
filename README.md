@@ -98,6 +98,7 @@ Mở http://localhost:8081 (đổi bằng `DASHBOARD_PORT`). Chỉ dùng lệnh 
 - Hai tab: **BROKER 1883 · PLAINTEXT** và **BROKER 8883 · TLS**, mỗi tab nối một broker riêng (API `?broker=plain|tls`). Firmware gửi vào cổng nào thì chỉ tab đó có dữ liệu.
 - Thẻ "Thiết bị đang hoạt động": số `device_id` có telemetry trong 15 giây gần nhất; thẻ "IoT publish đã nhận": số bản tin PUBLISH trên `factory/#` kể từ khi dashboard khởi động. Bảng bản tin hiển thị tối đa 100 gói.
 - Biểu đồ temperature/vibration và danh sách bản tin `factory/#`; lịch sử RAM tối đa 100 bản tin, 120 điểm/biểu đồ, restart backend sẽ xóa.
+- Bấm vào một bản tin để xem độ trễ: firmware gắn `sent_at_ms` (giờ NTP) và `prev_send_us` (thời gian đóng gói + mã hóa TLS + ghi socket của bản tin trước) vào payload; dashboard tính độ trễ = giờ nhận − `sent_at_ms`. Chỉ có tổng độ trễ, không tách riêng mạng/broker/dashboard; sai lệch đồng hồ ESP32 và máy chạy Docker nằm trong con số. Firmware cần Internet để NTP, nếu không thì bản tin không có độ trễ.
 - Dashboard chỉ đọc; credential MQTT chỉ dùng ở backend; không có đăng nhập dashboard.
 
 Kiểm tra nhanh: `curl -fsS http://localhost:8081/healthz` và `curl -fsS "http://localhost:8081/api/state?broker=tls"`.

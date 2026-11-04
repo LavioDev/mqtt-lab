@@ -175,6 +175,24 @@ class Monitor:
             self._emit("broker", {"connected": False, "changed_at": changed_at})
 
     @staticmethod
+    def _timing(decoded: dict[str, Any] | None, received_ms: float) -> dict[str, Any] | None:
+        """End-to-end delay needs firmware's NTP clock (sent_at_ms); skew between clocks shows up in the value."""
+        if decoded is None:
+            return None
+        sent = decoded.get("sent_at_ms")
+        send_us = decoded.get("prev_send_us")
+        valid_sent = isinstance(sent, int) and not isinstance(sent, bool) and sent > 0
+        valid_send = isinstance(send_us, int) and not isinstance(send_us, bool) and send_us >= 0
+        if not (valid_sent or valid_send):
+            return None
+        return {
+            "sent_at_ms": sent if valid_sent else None,
+            "received_at_ms": round(received_ms),
+            "latency_ms": round(received_ms - sent) if valid_sent else None,
+            "firmware_send_us": send_us if valid_send else None,
+        }
+
+    @staticmethod
     def _decode_payload(payload: bytes) -> dict[str, Any]:
         truncated = len(payload) > MAX_PAYLOAD_BYTES
         raw = payload[:MAX_PAYLOAD_BYTES]
@@ -241,6 +259,7 @@ class Monitor:
                 self._emit("devices", devices)
             return
 
+        received_ms = time.time() * 1000
         received_at = utc_now()
         payload = self._decode_payload(message.payload)
         decoded: dict[str, Any] | None = None
@@ -288,6 +307,7 @@ class Monitor:
                 "retained": bool(message.retain),
                 "payload": payload,
                 "telemetry": telemetry_point,
+                "timing": self._timing(decoded, received_ms),
             }
             self.messages.append(item)
             self.last_message_at = received_at

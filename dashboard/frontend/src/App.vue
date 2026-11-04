@@ -12,6 +12,7 @@ type Message = {
   retained: boolean
   payload: { kind: 'json' | 'text' | 'base64'; value: string; truncated: boolean }
   telemetry: TelemetryPoint | null
+  timing: { sent_at_ms: number | null; received_at_ms: number; latency_ms: number | null; firmware_send_us: number | null } | null
 }
 type State = {
   broker: { connected: boolean; changed_at: string | null; stats_at: string | null }
@@ -108,6 +109,16 @@ function selectBroker(id: 'plain' | 'tls') {
 function formatTime(value: string | null | undefined) {
   if (!value) return 'Chưa có dữ liệu'
   return new Intl.DateTimeFormat('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit' }).format(new Date(value))
+}
+function timingRows(message: Message) {
+  const t = message.timing
+  if (!t) return []
+  const rows: [string, string][] = []
+  if (t.sent_at_ms !== null) rows.push(['FIRMWARE GỬI (NTP)', new Date(t.sent_at_ms).toISOString().slice(11, 23)])
+  rows.push(['DASHBOARD NHẬN', new Date(t.received_at_ms).toISOString().slice(11, 23)])
+  if (t.latency_ms !== null) rows.push(['ĐỘ TRỄ FIRMWARE → DASHBOARD', `${t.latency_ms} ms${t.latency_ms < 0 ? ' (lệch đồng hồ)' : ''}`])
+  if (t.firmware_send_us !== null) rows.push(['FIRMWARE: ĐÓNG GÓI + MÃ HÓA + GHI SOCKET (BẢN TIN TRƯỚC)', `${(t.firmware_send_us / 1000).toFixed(2)} ms`])
+  return rows
 }
 function formatNumber(value: number | undefined) {
   return value === undefined ? '—' : new Intl.NumberFormat('vi-VN', { maximumFractionDigits: 1 }).format(value)
@@ -289,6 +300,8 @@ onUnmounted(() => eventSource.value?.close())
       <section class="detail-modal" role="dialog" aria-modal="true" aria-label="Chi tiết bản tin">
         <div class="modal-head"><div><div class="panel-kicker">MQTT PUBLISH · #{{ selectedMessage.id }}</div><h2>Chi tiết bản tin</h2></div><button class="close-button" @click="selectedMessage = null" aria-label="Đóng">×</button></div>
         <div class="detail-meta"><span>MQTT PACKET</span><code>{{ selectedMessage.packet_type }}</code><span>DEVICE ID</span><code>{{ selectedMessage.device_id || 'Không có trong payload' }}</code><span>TOPIC</span><code>{{ selectedMessage.topic }}</code><span>THỜI GIAN NHẬN</span><code>{{ formatTime(selectedMessage.received_at) }}</code><span>QOS / RETAINED</span><code>{{ selectedMessage.qos }} / {{ selectedMessage.retained ? 'yes' : 'no' }}</code><span>PAYLOAD TYPE</span><code>{{ selectedMessage.payload.kind }}{{ selectedMessage.payload.truncated ? ' · truncated at 64 KiB' : '' }}</code></div>
+        <div v-if="timingRows(selectedMessage).length" class="detail-meta"><template v-for="[label, value] in timingRows(selectedMessage)" :key="label"><span>{{ label }}</span><code>{{ value }}</code></template></div>
+        <p v-if="timingRows(selectedMessage).length" class="timing-note">Độ trễ = giờ dashboard nhận − giờ firmware gửi (đồng hồ ESP32 qua NTP so với đồng hồ máy chạy Docker), gồm mạng, mã hóa/giải mã TLS, broker và dashboard; không tách riêng từng bước được.</p>
         <pre class="detail-payload">{{ payloadDetail(selectedMessage) }}</pre>
       </section>
     </div>

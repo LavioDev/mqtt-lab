@@ -12,3 +12,4 @@ dashboard/frontend/dist/
 
 firmware/build/
 config/mosquitto/certs/
+firmware/mqtt_sensor/build/

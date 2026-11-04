@@ -1,10 +1,15 @@
 #include <ArduinoMqttClient.h>
 #include <esp_system.h>
 #include <WiFi.h>
+#include <sys/time.h>
 #include <time.h>
 #include <cstring>
 
 #include "firmware_config.h"
+
+#ifndef MQTT_TLS
+#define MQTT_TLS 0  // header generated before TLS support existed
+#endif
 
 #if MQTT_TLS
 #include <WiFiClientSecure.h>
@@ -19,6 +24,7 @@ MqttClient mqttClient(networkClient);
 
 unsigned long lastPublishMs = 0;
 unsigned long messageNumber = 0;
+unsigned long lastSendUs = 0;  // cost of the previous publish call (MQTT framing + TLS encrypt + socket write)
 
 void connectWiFi() {
   if (WiFi.status() == WL_CONNECTED) return;
@@ -34,10 +40,11 @@ void connectWiFi() {
   Serial.printf("\nWi-Fi connected; IP=%s\n", WiFi.localIP().toString().c_str());
 }
 
-#if MQTT_TLS
-// Certificate validity checks need a real clock.
+// TLS needs a real clock for certificate validity; plain mode uses it only for sent_at_ms (one attempt).
 void syncClock() {
-  if (time(nullptr) > 1700000000) return;
+  static bool tried = false;
+  if (time(nullptr) > 1700000000 || (!MQTT_TLS && tried)) return;
+  tried = true;
   configTime(0, 0, "pool.ntp.org", "time.google.com");
   Serial.print("Syncing clock");
   for (int i = 0; i < 60 && time(nullptr) < 1700000000; ++i) {
@@ -46,13 +53,12 @@ void syncClock() {
   }
   Serial.println();
 }
-#endif
 
 void connectMqtt() {
   while (!mqttClient.connected()) {
     connectWiFi();
-#if MQTT_TLS
     syncClock();
+#if MQTT_TLS
     networkClient.setCACert(MQTT_CA_CERT);
 #endif
     mqttClient.setId(MQTT_CLIENT_ID);
@@ -89,14 +95,21 @@ void loop() {
 
   const float temperature = static_cast<float>(random(360, 451)) / 10.0f;
   const float vibration = static_cast<float>(random(5, 41)) / 10.0f;
-  char payload[192];
+  // sent_at_ms is 0 when NTP has not synced; the dashboard then shows no latency.
+  struct timeval tv;
+  gettimeofday(&tv, nullptr);
+  const unsigned long long sentAtMs = time(nullptr) > 1700000000
+      ? static_cast<unsigned long long>(tv.tv_sec) * 1000ULL + tv.tv_usec / 1000 : 0ULL;
+  char payload[256];
   snprintf(payload, sizeof(payload),
-           "{\"message_id\":\"%s-%06lu\",\"device_id\":\"%s\",\"temperature_c\":%.1f,\"vibration_mm_s\":%.1f,\"uptime_ms\":%lu}",
-           MQTT_CLIENT_ID, messageNumber, DEVICE_ID, temperature, vibration, now);
+           "{\"message_id\":\"%s-%06lu\",\"device_id\":\"%s\",\"temperature_c\":%.1f,\"vibration_mm_s\":%.1f,\"uptime_ms\":%lu,\"sent_at_ms\":%llu,\"prev_send_us\":%lu}",
+           MQTT_CLIENT_ID, messageNumber, DEVICE_ID, temperature, vibration, now, sentAtMs, lastSendUs);
 
+  const unsigned long sendStartUs = micros();
   const int messageSize = mqttClient.beginMessage(MQTT_TOPIC, false, MQTT_QOS);
   const size_t written = mqttClient.print(payload);
   const int result = mqttClient.endMessage();
+  lastSendUs = micros() - sendStartUs;
   if (messageSize && written == strlen(payload) && result == 1) {
     Serial.printf("PUBLISH_ACKED %s %s\n", MQTT_TOPIC, payload);
     ++messageNumber;
